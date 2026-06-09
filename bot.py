@@ -3,13 +3,14 @@ import aiohttp
 import asyncio
 import random
 from datetime import datetime, timezone
+from aiohttp import web  # Added to handle Render's free web service requirement
 
 # Initialize discord.py v1.7.3 Client
 client = discord.Client()
 
 # Configuration
 CHANNEL_ID = 1277978499864596480
-TOKEN = "MTI4NTY0NjEzMzk3NjEwNTA5Mg.GCSxnC.ljUVlvkYFkgfGUeP2qXXd6xjqWLJLWIgNxQArE"
+TOKEN = "MzkyNzYzNzkyODYzNTI2OTEz.GBDFiC.d_pIkHXbDXV-GqAhlountLLBk4lvcCFc87HQ4w"
 
 # 30 Unique Titles
 TITLES = [
@@ -59,34 +60,24 @@ MESSAGES = [
     "Hello there, Myreceipt along with its live domain is officially under my authority. Visit https://myreceipt.cc to create receipts."
 ]
 
-# Queues to track historical choices (preventing repetitions within 4 steps)
 recent_titles = []
 recent_messages = []
 
 def get_unique_choice(pool, history_list):
-    """Selects a random item from the pool that isn't inside the history limits."""
     available_choices = [item for item in pool if item not in history_list]
     selected = random.choice(available_choices)
-    
     history_list.append(selected)
     if len(history_list) > 4:
         history_list.pop(0)
-        
     return selected
 
 async def execute_thread_creation(session):
-    """
-    Handles a single isolated attempt to create a thread and send a message.
-    Returns a float representing the retry cooldown if a 429 rate limit is encountered.
-    """
     headers = {
-        "Authorization": "MTI4NTY0NjEzMzk3NjEwNTA5Mg.GCSxnC.ljUVlvkYFkgfGUeP2qXXd6xjqWLJLWIgNxQArE",
+        "Authorization": "MzkyNzYzNzkyODYzNTI2OTEz.GBDFiC.d_pIkHXbDXV-GqAhlountLLBk4lvcCFc87HQ4w",
         "Content-Type": "application/json",
         "Accept": "*/*"
     }
-    
     thread_url = f"https://discord.com/api/v9/channels/{CHANNEL_ID}/threads"
-    
     title = get_unique_choice(TITLES, recent_titles)
     message_content = get_unique_choice(MESSAGES, recent_messages)
     
@@ -101,7 +92,7 @@ async def execute_thread_creation(session):
             if response.status == 429:
                 err_data = await response.json()
                 retry_after = err_data.get("retry_after", 10.0)
-                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Thread Creation Rate Limited! Need to wait {retry_after}s.")
+                print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Rate Limited! Waiting {retry_after}s.")
                 return float(retry_after)
                 
             elif response.status in (200, 201):
@@ -109,61 +100,65 @@ async def execute_thread_creation(session):
                 thread_id = thread_data['id']
                 print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Created Thread: '{title}'")
                 
-                # Post text message inside the newly created thread context
                 message_url = f"https://discord.com/api/v9/channels/{thread_id}/messages"
                 message_payload = {"content": message_content}
                 
                 async with session.post(message_url, json=message_payload, headers=headers) as msg_response:
                     if msg_response.status == 429:
                         msg_err = await msg_response.json()
-                        retry_after = msg_err.get("retry_after", 5.0)
-                        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Message Sending Rate Limited! Need to wait {retry_after}s.")
-                        return float(retry_after)
+                        return float(msg_err.get("retry_after", 5.0))
                     elif msg_response.status in (200, 201):
                         print(f" -> Text update successfully updated inside channel ID: {thread_id}")
                     else:
                         print(f" -> Message write error. Status: {msg_response.status}")
             else:
-                err_text = await response.text()
-                print(f"Failed to create thread. Status: {response.status} | Content: {err_text}")
-                
+                print(f"Failed to create thread. Status: {response.status}")
     except Exception as e:
         print(f"An unexpected API error occurred: {e}")
-        
     return None
 
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user.name} (ID: {client.user.id})")
-    print("------")
     print("System sitting idle. Waiting for members to join...")
 
 @client.event
 async def on_member_join(member):
-    """
-    Fires exclusively when a user joins the server.
-    Attempts to create exactly 5 threads sequentially, respecting rate limits.
-    """
     print(f"\n[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {member.name} joined. Initiating 5 thread bursts...")
-    
     async with aiohttp.ClientSession() as session:
         threads_created = 0
-        
         while threads_created < 5:
-            # Attempt to create a single thread
             cooldown = await execute_thread_creation(session)
-            
             if cooldown:
-                # If rate-limited, wait out the mandatory cooldown plus a tiny buffer, then retry that same slot
                 await asyncio.sleep(cooldown + 0.5)
             else:
-                # Thread was created successfully
                 threads_created += 1
-                # Give a 1-second pause between successful executions to minimize running head-first into rate limits
                 if threads_created < 5:
                     await asyncio.sleep(1.0)
-                    
-    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Finished processing join-burst sequence for {member.name}.\n")
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Finished sequence for {member.name}.\n")
 
-# Run script using user account self-bot framework parameters
-client.run("MTI4NTY0NjEzMzk3NjEwNTA5Mg.GCSxnC.ljUVlvkYFkgfGUeP2qXXd6xjqWLJLWIgNxQArE", bot=False)
+# --- Fake Web Server to Satisfy Render Free Tier Port Bindings ---
+async def handle_ping(request):
+    return web.Response(text="Bot is alive!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render assigns an environment variable named PORT automatically
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"Fake Web Server listening on port {port}")
+
+# Combine both running loops together
+async def main():
+    await start_web_server()
+    await client.login("MzkyNzYzNzkyODYzNTI2OTEz.GBDFiC.d_pIkHXbDXV-GqAhlountLLBk4lvcCFc87HQ4w", bot=False)
+    await client.connect()
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
