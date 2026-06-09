@@ -3,7 +3,7 @@ import aiohttp
 import asyncio
 import random
 from datetime import datetime, timezone
-from aiohttp import web  # Added to handle Render's free web service requirement
+from aiohttp import web
 
 # Initialize discord.py v1.7.3 Client
 client = discord.Client()
@@ -146,14 +146,12 @@ async def start_web_server():
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
-    # Render assigns an environment variable named PORT automatically
     import os
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"Fake Web Server listening on port {port}")
 
-# Combine both running loops together
 async def main():
     await start_web_server()
     await client.login("MzkyNzYzNzkyODYzNTI2OTEz.GBDFiC.d_pIkHXbDXV-GqAhlountLLBk4lvcCFc87HQ4w", bot=False)
